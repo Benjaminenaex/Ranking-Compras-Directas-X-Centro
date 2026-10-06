@@ -102,9 +102,10 @@ def write_sheet_autofit(writer, df, sheet_name, workbook):
     fmt_text = workbook.add_format({'border': 1})
 
     for col_idx, col_name in enumerate(df_clean.columns):
-        # Calcular ancho máximo de celdas con margen holgado extra (+6 caracteres)
+        # Calcular ancho máximo de celdas usando .str.len() vectorial para compatibilidad total con Pandas
         col_series = df_clean[col_name].astype(str)
-        max_val_len = col_series.map(len).max() if not df_clean.empty else 0
+        max_val = col_series.str.len().max()
+        max_val_len = int(max_val) if pd.notna(max_val) else 0
         max_hdr_len = len(str(col_name))
         col_width = max(max(max_val_len, max_hdr_len) + 6, 14)
         
