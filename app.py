@@ -77,48 +77,23 @@ def clean_numeric(series):
     s = s.str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
     return pd.to_numeric(s, errors='coerce').fillna(0)
 
-def auto_detect_col_smart(df, priority_keywords):
-    """Detección inteligente de columnas evitando confusiones con campos de fechas o tipos"""
-    if df is None or df.empty:
-        return None
-    cols = list(df.columns)
-    cols_lower = [str(c).lower().strip() for c in cols]
-    
-    # 1. Coincidencia exacta de nombre
-    for kw in priority_keywords:
-        kw_l = kw.lower().strip()
-        for i, cl in enumerate(cols_lower):
-            if cl == kw_l:
-                return cols[i]
-                
-    # 2. Coincidencia parcial excluyendo campos ambiguos
-    for kw in priority_keywords:
-        kw_l = kw.lower().strip()
-        for i, cl in enumerate(cols_lower):
-            if 'documento' in kw_l and 'fecha' in cl:
-                continue
-            if 'posici' in kw_l and 'tipo' in cl:
-                continue
-            if kw_l in cl:
-                return cols[i]
-    return None
-
-def write_sheet_autofit(writer, df, sheet_name, workbook, is_raw_data=False):
-    """Escribe un DataFrame con anchos de columna automáticos y formatos numéricos/textos estrictos"""
+def write_sheet_autofit(writer, df, sheet_name, workbook):
+    """Escribe hojas en Excel autoajustando anchos para prevenir '####' y formato de texto estricto para evitar '4,5E+09'"""
     if df is None or df.empty:
         return
         
     df_clean = df.copy()
     
-    # Pre-formatear documentos SAP a texto para prevenir notación científica (4,5E+09)
-    doc_cols = [c for c in df_clean.columns if any(k in str(c).lower() for k in ['documento', 'pedido', 'solicitud', 'proveedor'])]
-    for dc in doc_cols:
-        df_clean[dc] = df_clean[dc].astype(str).str.replace(r'\.0$', '', regex=True).str.replace('nan', '', case=False)
+    # Pre-formatear documentos SAP a texto limpio sin notación científica
+    for c in df_clean.columns:
+        c_str = str(c).lower()
+        if any(k in c_str for k in ['documento', 'pedido', 'solicitud', 'proveedor', 'posicion', 'posición', 'material', 'licitación', 'licitacion']):
+            df_clean[c] = df_clean[c].astype(str).str.replace(r'\.0$', '', regex=True).str.replace('nan', '', case=False).str.replace('None', '', case=False)
 
     df_clean.to_excel(writer, sheet_name=sheet_name, index=False)
     ws = writer.sheets[sheet_name]
 
-    # Estilos Excel
+    # Formatos
     fmt_header = workbook.add_format({'bold': True, 'font_color': '#FFFFFF', 'bg_color': '#1E293B', 'border': 1, 'align': 'center', 'valign': 'vcenter'})
     fmt_currency = workbook.add_format({'num_format': '$ #,##0', 'border': 1})
     fmt_integer = workbook.add_format({'num_format': '#,##0', 'border': 1, 'align': 'center'})
@@ -127,21 +102,20 @@ def write_sheet_autofit(writer, df, sheet_name, workbook, is_raw_data=False):
     fmt_text = workbook.add_format({'border': 1})
 
     for col_idx, col_name in enumerate(df_clean.columns):
-        # Calcular ancho máximo de celda
-        max_len = max(
-            len(str(col_name)),
-            df_clean[col_name].astype(str).map(len).max() if not df_clean.empty else 0
-        )
-        col_width = max(max_len + 5, 12)
+        # Calcular ancho máximo de celdas con margen holgado extra (+6 caracteres)
+        col_series = df_clean[col_name].astype(str)
+        max_val_len = col_series.map(len).max() if not df_clean.empty else 0
+        max_hdr_len = len(str(col_name))
+        col_width = max(max(max_val_len, max_hdr_len) + 6, 14)
         
         col_lower = str(col_name).lower()
-        if 'valor' in col_lower or 'monto' in col_lower or 'precio' in col_lower:
+        if 'valor' in col_lower or 'monto' in col_lower or 'precio' in col_lower or '$' in col_name:
             cell_fmt = fmt_currency
         elif 'fecha' in col_lower:
             cell_fmt = fmt_date
-        elif any(k in col_lower for k in ['documento', 'pedido', 'solicitud', 'proveedor']):
+        elif any(k in col_lower for k in ['documento', 'pedido', 'solicitud', 'proveedor', 'material']):
             cell_fmt = fmt_doc
-        elif 'posición' in col_lower or 'posicion' in col_lower or 'cantidad' in col_lower or 'cant.' in col_lower or col_name == 'Posición':
+        elif col_lower in ['posición', 'posicion', 'cant. pedidos', 'cant. registros', 'cant. solpeds', 'posisión']:
             cell_fmt = fmt_integer
         else:
             cell_fmt = fmt_text
@@ -225,10 +199,10 @@ def export_to_excel_styled(df_ranking, df_grupo, df_pnna, df_cruce, df_me2m_full
 
             # 5. Detalle ME2M Completo
             if df_me2m_full is not None and not df_me2m_full.empty:
-                write_sheet_autofit(writer, df_me2m_full.head(5000), 'Detalle ME2M', workbook, is_raw_data=True)
+                write_sheet_autofit(writer, df_me2m_full.head(5000), 'Detalle ME2M', workbook)
 
         else:
-            # Fallback openpyxl si xlsxwriter no estuviera presente
+            # Fallback seguro openpyxl si xlsxwriter no está disponible
             if df_ranking is not None and not df_ranking.empty:
                 df_ranking.to_excel(writer, sheet_name='Ranking Centros', index=False)
             if df_grupo is not None and not df_grupo.empty:
@@ -247,25 +221,25 @@ df_me2m = load_excel(file_me2m)
 
 if df_me2m is not None or df_me5a is not None:
     
-    # Detección inteligente de columnas en ME2M
+    # Procesamiento ME2M
     if df_me2m is not None:
-        col_monto_me2m = auto_detect_col_smart(df_me2m, ['por entregar (valor)', 'valor neto', 'monto', 'importe', 'valor']) or 'Por entregar (valor)'
-        col_licita_me2m = auto_detect_col_smart(df_me2m, ['licitación', 'licitacion']) or 'Licitación'
-        col_centro_me2m = auto_detect_col_smart(df_me2m, ['centro']) or 'Centro'
-        col_grp_me2m = auto_detect_col_smart(df_me2m, ['grupo de compras', 'grupo compras', 'grupo']) or 'Grupo de compras'
-        col_doc_me2m = auto_detect_col_smart(df_me2m, ['documento compras', 'doc. compras', 'doc compras', 'documento']) or 'Documento compras'
-        col_pos_me2m = auto_detect_col_smart(df_me2m, ['posición', 'posicion', 'pos.']) or 'Posición'
+        col_monto_me2m = next((c for c in df_me2m.columns if 'valor' in c.lower() or 'monto' in c.lower()), 'Por entregar (valor)')
+        col_licita_me2m = next((c for c in df_me2m.columns if 'licita' in c.lower()), 'Licitación')
+        col_centro_me2m = next((c for c in df_me2m.columns if 'centro' in c.lower() and 'suministrador' not in c.lower()), 'Centro')
+        col_grp_me2m = next((c for c in df_me2m.columns if 'grupo' in c.lower()), 'Grupo de compras')
+        col_doc_me2m = next((c for c in df_me2m.columns if 'documento' in c.lower() and 'fecha' not in c.lower()), 'Documento compras')
+        col_pos_me2m = next((c for c in df_me2m.columns if 'posición' in c.lower() or 'posicion' in c.lower()), 'Posición')
 
         df_me2m['Monto_Limpio'] = clean_numeric(df_me2m[col_monto_me2m]) if col_monto_me2m in df_me2m.columns else 0.0
         df_me2m['Es_Compra_Directa'] = df_me2m[col_licita_me2m].astype(str).str.upper().str.startswith('AD') if col_licita_me2m in df_me2m.columns else False
     
-    # Detección inteligente de columnas en ME5A
+    # Procesamiento ME5A
     if df_me5a is not None:
-        col_monto_me5a = auto_detect_col_smart(df_me5a, ['valor total', 'monto total', 'valor', 'monto']) or 'Valor total'
-        col_ped_me5a = auto_detect_col_smart(df_me5a, ['pedido']) or 'Pedido'
-        col_posped_me5a = auto_detect_col_smart(df_me5a, ['posición de pedido', 'posicion de pedido', 'pos. pedido']) or 'Posición de pedido'
-        col_autor_me5a = auto_detect_col_smart(df_me5a, ['autor', 'solicitante', 'área', 'area']) or 'Autor'
-        col_centro_me5a = auto_detect_col_smart(df_me5a, ['centro']) or 'Centro'
+        col_monto_me5a = next((c for c in df_me5a.columns if 'valor' in c.lower() or 'monto' in c.lower()), 'Valor total')
+        col_ped_me5a = next((c for c in df_me5a.columns if 'pedido' in c.lower() and 'posición' not in c.lower() and 'solicitud' not in c.lower()), 'Pedido')
+        col_posped_me5a = next((c for c in df_me5a.columns if ('posició' in c.lower() or 'posicion' in c.lower()) and 'tipo' not in c.lower()), 'Posición de pedido')
+        col_autor_me5a = next((c for c in df_me5a.columns if 'autor' in c.lower() or 'solicitante' in c.lower()), 'Autor')
+        col_centro_me5a = next((c for c in df_me5a.columns if 'centro' in c.lower()), 'Centro')
 
         df_me5a['Monto_Limpio'] = clean_numeric(df_me5a[col_monto_me5a]) if col_monto_me5a in df_me5a.columns else 0.0
         df_me5a['Es_PNNA'] = df_me5a[col_ped_me5a].isna() | (df_me5a[col_ped_me5a] == 0) | (df_me5a[col_ped_me5a].astype(str).str.strip() == '')
