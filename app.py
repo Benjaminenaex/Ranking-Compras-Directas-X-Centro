@@ -363,8 +363,10 @@ if df_me2m is not None or df_me5a is not None:
                 st.plotly_chart(fig_centro, use_container_width=True)
 
             with c2:
+                df_rank_disp = ranking_centro.copy()
+                df_rank_disp['Monto Total ($)'] = df_rank_disp['Monto Total ($)'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "$0")
                 st.dataframe(
-                    ranking_centro.style.format({'Monto Total ($)': "${:,.0f}"}),
+                    df_rank_disp,
                     hide_index=True,
                     use_container_width=True
                 )
@@ -403,7 +405,9 @@ if df_me2m is not None or df_me5a is not None:
             )
             st.plotly_chart(fig_pnna, use_container_width=True)
 
-            st.dataframe(pnna_area.style.format({'Monto PNNA ($)': "${:,.0f}"}), use_container_width=True, hide_index=True)
+            df_pnna_disp = pnna_area.copy()
+            df_pnna_disp['Monto PNNA ($)'] = df_pnna_disp['Monto PNNA ($)'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "$0")
+            st.dataframe(df_pnna_disp, use_container_width=True, hide_index=True)
         else:
             st.warning("Carga el archivo ME5A con Ariba para visualizar el análisis de PNNA.")
 
@@ -421,11 +425,14 @@ if df_me2m is not None or df_me5a is not None:
             ]
             cols_avail = [c for c in cols_show if c in merged_df.columns]
 
+            df_cruce_disp = merged_df[cols_avail].copy()
+            if 'Monto_Limpio_SOLPED' in df_cruce_disp.columns:
+                df_cruce_disp['Monto_Limpio_SOLPED'] = df_cruce_disp['Monto_Limpio_SOLPED'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) and isinstance(x, (int, float)) else "$0")
+            if 'Monto_Limpio_PEDIDO' in df_cruce_disp.columns:
+                df_cruce_disp['Monto_Limpio_PEDIDO'] = df_cruce_disp['Monto_Limpio_PEDIDO'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) and isinstance(x, (int, float)) else "$0")
+
             st.dataframe(
-                merged_df[cols_avail].style.format({
-                    'Monto_Limpio_SOLPED': "${:,.0f}", 
-                    'Monto_Limpio_PEDIDO': "${:,.0f}"
-                }),
+                df_cruce_disp,
                 use_container_width=True,
                 hide_index=True
             )
