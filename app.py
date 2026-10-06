@@ -5,7 +5,7 @@ import plotly.express as px
 
 st.set_page_config(page_title="Dashboard Compras Directas & Cruce SAP", layout="wide")
 
-# Estilos CSS para adaptar tarjetas de métricas e iconos SVG sin desbordamiento de texto
+# Estilos CSS para adaptar tarjetas de métricas e iconos SVG
 st.markdown("""
     <style>
     [data-testid="stMetricValue"] {
@@ -40,7 +40,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Dibujos vectoriales minimalistas SVG (sin emojis)
+# Dibujos vectoriales minimalistas SVG
 SVG_ICONS = {
     "report": '<svg class="svg-icon" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#E11D48" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/><path d="M3 11l6-5 4 4 7-7"/><path d="M16 3h4v4"/></svg>',
     "trophy": '<svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E11D48" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2z"/></svg>',
@@ -77,48 +77,100 @@ def clean_numeric(series):
     s = s.str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
     return pd.to_numeric(s, errors='coerce').fillna(0)
 
-# Función segura para generar el archivo Excel formateado con fallback automático
+def auto_detect_col_smart(df, priority_keywords):
+    """Detección inteligente de columnas evitando confusiones con campos de fechas o tipos"""
+    if df is None or df.empty:
+        return None
+    cols = list(df.columns)
+    cols_lower = [str(c).lower().strip() for c in cols]
+    
+    # 1. Coincidencia exacta de nombre
+    for kw in priority_keywords:
+        kw_l = kw.lower().strip()
+        for i, cl in enumerate(cols_lower):
+            if cl == kw_l:
+                return cols[i]
+                
+    # 2. Coincidencia parcial excluyendo campos ambiguos
+    for kw in priority_keywords:
+        kw_l = kw.lower().strip()
+        for i, cl in enumerate(cols_lower):
+            if 'documento' in kw_l and 'fecha' in cl:
+                continue
+            if 'posici' in kw_l and 'tipo' in cl:
+                continue
+            if kw_l in cl:
+                return cols[i]
+    return None
+
+def write_sheet_autofit(writer, df, sheet_name, workbook, is_raw_data=False):
+    """Escribe un DataFrame con anchos de columna automáticos y formatos numéricos/textos estrictos"""
+    if df is None or df.empty:
+        return
+        
+    df_clean = df.copy()
+    
+    # Pre-formatear documentos SAP a texto para prevenir notación científica (4,5E+09)
+    doc_cols = [c for c in df_clean.columns if any(k in str(c).lower() for k in ['documento', 'pedido', 'solicitud', 'proveedor'])]
+    for dc in doc_cols:
+        df_clean[dc] = df_clean[dc].astype(str).str.replace(r'\.0$', '', regex=True).str.replace('nan', '', case=False)
+
+    df_clean.to_excel(writer, sheet_name=sheet_name, index=False)
+    ws = writer.sheets[sheet_name]
+
+    # Estilos Excel
+    fmt_header = workbook.add_format({'bold': True, 'font_color': '#FFFFFF', 'bg_color': '#1E293B', 'border': 1, 'align': 'center', 'valign': 'vcenter'})
+    fmt_currency = workbook.add_format({'num_format': '$ #,##0', 'border': 1})
+    fmt_integer = workbook.add_format({'num_format': '#,##0', 'border': 1, 'align': 'center'})
+    fmt_date = workbook.add_format({'num_format': 'yyyy-mm-dd', 'border': 1, 'align': 'center'})
+    fmt_doc = workbook.add_format({'num_format': '@', 'border': 1, 'align': 'center'})
+    fmt_text = workbook.add_format({'border': 1})
+
+    for col_idx, col_name in enumerate(df_clean.columns):
+        # Calcular ancho máximo de celda
+        max_len = max(
+            len(str(col_name)),
+            df_clean[col_name].astype(str).map(len).max() if not df_clean.empty else 0
+        )
+        col_width = max(max_len + 5, 12)
+        
+        col_lower = str(col_name).lower()
+        if 'valor' in col_lower or 'monto' in col_lower or 'precio' in col_lower:
+            cell_fmt = fmt_currency
+        elif 'fecha' in col_lower:
+            cell_fmt = fmt_date
+        elif any(k in col_lower for k in ['documento', 'pedido', 'solicitud', 'proveedor']):
+            cell_fmt = fmt_doc
+        elif 'posición' in col_lower or 'posicion' in col_lower or 'cantidad' in col_lower or 'cant.' in col_lower or col_name == 'Posición':
+            cell_fmt = fmt_integer
+        else:
+            cell_fmt = fmt_text
+
+        ws.set_column(col_idx, col_idx, col_width, cell_fmt)
+        ws.write(0, col_idx, str(col_name), fmt_header)
+
 def export_to_excel_styled(df_ranking, df_grupo, df_pnna, df_cruce, df_me2m_full, df_me5a_full):
     output = io.BytesIO()
     
-    # Verificación de librerías para exportar a Excel sin fallar en Streamlit Cloud
     has_xlsxwriter = False
     try:
         import xlsxwriter
         engine = 'xlsxwriter'
         has_xlsxwriter = True
     except (ImportError, ModuleNotFoundError):
-        engine = None  # Utiliza el motor por defecto disponible (ej. openpyxl)
+        engine = None
 
     writer_kwargs = {'engine': engine} if engine else {}
 
     with pd.ExcelWriter(output, **writer_kwargs) as writer:
         if has_xlsxwriter:
             workbook = writer.book
-            
-            # Formatos de celdas estilizados
-            fmt_header = workbook.add_format({
-                'bold': True, 'font_color': '#FFFFFF', 'bg_color': '#1E293B',
-                'border': 1, 'align': 'center', 'valign': 'vcenter'
-            })
-            fmt_currency = workbook.add_format({'num_format': '$ #,##0', 'border': 1})
-            fmt_integer = workbook.add_format({'num_format': '#,##0', 'border': 1, 'align': 'center'})
-            fmt_text = workbook.add_format({'border': 1})
 
-            # 1. Hoja Ranking Compras Directas
+            # 1. Ranking Centros
             if df_ranking is not None and not df_ranking.empty:
-                df_ranking.to_excel(writer, sheet_name='Ranking Centros', index=False)
-                ws = writer.sheets['Ranking Centros']
+                write_sheet_autofit(writer, df_ranking, 'Ranking Centros', workbook)
+                ws1 = writer.sheets['Ranking Centros']
                 
-                ws.set_column('A:A', 12, fmt_integer)
-                ws.set_column('B:B', 16, fmt_text)
-                ws.set_column('C:C', 22, fmt_currency)
-                ws.set_column('D:D', 16, fmt_integer)
-                
-                for col_num, col_name in enumerate(df_ranking.columns):
-                    ws.write(0, col_num, col_name, fmt_header)
-
-                # Gráfico de Barras Carmesí en Excel
                 chart1 = workbook.add_chart({'type': 'column'})
                 chart1.add_series({
                     'name': 'Monto Total ($)',
@@ -129,18 +181,14 @@ def export_to_excel_styled(df_ranking, df_grupo, df_pnna, df_cruce, df_me2m_full
                 chart1.set_title({'name': 'Top Compras Directas por Centro'})
                 chart1.set_x_axis({'name': 'Centro'})
                 chart1.set_y_axis({'name': 'Monto ($)'})
-                chart1.set_style(10)
-                ws.insert_chart('F2', chart1)
+                chart1.set_legend({'position': 'none'})
+                chart1.set_size({'width': 750, 'height': 420})
+                ws1.insert_chart('F2', chart1)
 
-            # 2. Hoja Grupos de Compra
+            # 2. Grupos de Compra
             if df_grupo is not None and not df_grupo.empty:
-                df_grupo.to_excel(writer, sheet_name='Grupos de Compra', index=False)
-                ws = writer.sheets['Grupos de Compra']
-                ws.set_column('A:A', 22, fmt_text)
-                ws.set_column('B:B', 22, fmt_currency)
-                
-                for col_num, col_name in enumerate(df_grupo.columns):
-                    ws.write(0, col_num, col_name, fmt_header)
+                write_sheet_autofit(writer, df_grupo, 'Grupos de Compra', workbook)
+                ws2 = writer.sheets['Grupos de Compra']
 
                 chart2 = workbook.add_chart({'type': 'column'})
                 chart2.add_series({
@@ -150,19 +198,14 @@ def export_to_excel_styled(df_ranking, df_grupo, df_pnna, df_cruce, df_me2m_full
                     'fill': {'color': '#2563EB'}
                 })
                 chart2.set_title({'name': 'Monto por Grupo de Compra'})
-                ws.insert_chart('D2', chart2)
+                chart2.set_legend({'position': 'none'})
+                chart2.set_size({'width': 650, 'height': 380})
+                ws2.insert_chart('D2', chart2)
 
-            # 3. Hoja PNNA por Área
+            # 3. PNNA por Área
             if df_pnna is not None and not df_pnna.empty:
-                df_pnna.to_excel(writer, sheet_name='PNNA por Área', index=False)
-                ws = writer.sheets['PNNA por Área']
-                ws.set_column('A:A', 22, fmt_text)
-                ws.set_column('B:B', 16, fmt_text)
-                ws.set_column('C:C', 22, fmt_currency)
-                ws.set_column('D:D', 16, fmt_integer)
-
-                for col_num, col_name in enumerate(df_pnna.columns):
-                    ws.write(0, col_num, col_name, fmt_header)
+                write_sheet_autofit(writer, df_pnna, 'PNNA por Área', workbook)
+                ws3 = writer.sheets['PNNA por Área']
 
                 chart3 = workbook.add_chart({'type': 'column'})
                 chart3.add_series({
@@ -172,22 +215,20 @@ def export_to_excel_styled(df_ranking, df_grupo, df_pnna, df_cruce, df_me2m_full
                     'fill': {'color': '#D97706'}
                 })
                 chart3.set_title({'name': 'Top PNNA por Área / Autor'})
-                ws.insert_chart('F2', chart3)
+                chart3.set_legend({'position': 'none'})
+                chart3.set_size({'width': 750, 'height': 420})
+                ws3.insert_chart('F2', chart3)
 
-            # 4. Hoja Cruce SOLPED vs Pedido
+            # 4. Cruce SOLPED vs Pedido
             if df_cruce is not None and not df_cruce.empty:
-                df_cruce.to_excel(writer, sheet_name='Cruce ME5A vs ME2M', index=False)
-                ws = writer.sheets['Cruce ME5A vs ME2M']
-                ws.set_column('A:Z', 18, fmt_text)
-                for col_num, col_name in enumerate(df_cruce.columns):
-                    ws.write(0, col_num, col_name, fmt_header)
+                write_sheet_autofit(writer, df_cruce, 'Cruce ME5A vs ME2M', workbook)
 
             # 5. Detalle ME2M Completo
             if df_me2m_full is not None and not df_me2m_full.empty:
-                df_me2m_full.head(5000).to_excel(writer, sheet_name='Detalle ME2M', index=False)
+                write_sheet_autofit(writer, df_me2m_full.head(5000), 'Detalle ME2M', workbook, is_raw_data=True)
 
         else:
-            # Fallback seguro con openpyxl si xlsxwriter no estuviera en el servidor
+            # Fallback openpyxl si xlsxwriter no estuviera presente
             if df_ranking is not None and not df_ranking.empty:
                 df_ranking.to_excel(writer, sheet_name='Ranking Centros', index=False)
             if df_grupo is not None and not df_grupo.empty:
@@ -206,25 +247,25 @@ df_me2m = load_excel(file_me2m)
 
 if df_me2m is not None or df_me5a is not None:
     
-    # Procesamiento ME2M
+    # Detección inteligente de columnas en ME2M
     if df_me2m is not None:
-        col_monto_me2m = next((c for c in df_me2m.columns if 'valor' in c.lower() or 'monto' in c.lower()), 'Por entregar (valor)')
-        col_licita_me2m = next((c for c in df_me2m.columns if 'licita' in c.lower()), 'Licitación')
-        col_centro_me2m = next((c for c in df_me2m.columns if 'centro' in c.lower() and 'suministrador' not in c.lower()), 'Centro')
-        col_grp_me2m = next((c for c in df_me2m.columns if 'grupo' in c.lower()), 'Grupo de compras')
-        col_doc_me2m = next((c for c in df_me2m.columns if 'documento' in c.lower() or 'pedido' in c.lower()), 'Documento compras')
-        col_pos_me2m = next((c for c in df_me2m.columns if 'posición' in c.lower() or 'posicion' in c.lower()), 'Posición')
+        col_monto_me2m = auto_detect_col_smart(df_me2m, ['por entregar (valor)', 'valor neto', 'monto', 'importe', 'valor']) or 'Por entregar (valor)'
+        col_licita_me2m = auto_detect_col_smart(df_me2m, ['licitación', 'licitacion']) or 'Licitación'
+        col_centro_me2m = auto_detect_col_smart(df_me2m, ['centro']) or 'Centro'
+        col_grp_me2m = auto_detect_col_smart(df_me2m, ['grupo de compras', 'grupo compras', 'grupo']) or 'Grupo de compras'
+        col_doc_me2m = auto_detect_col_smart(df_me2m, ['documento compras', 'doc. compras', 'doc compras', 'documento']) or 'Documento compras'
+        col_pos_me2m = auto_detect_col_smart(df_me2m, ['posición', 'posicion', 'pos.']) or 'Posición'
 
         df_me2m['Monto_Limpio'] = clean_numeric(df_me2m[col_monto_me2m]) if col_monto_me2m in df_me2m.columns else 0.0
         df_me2m['Es_Compra_Directa'] = df_me2m[col_licita_me2m].astype(str).str.upper().str.startswith('AD') if col_licita_me2m in df_me2m.columns else False
     
-    # Procesamiento ME5A
+    # Detección inteligente de columnas en ME5A
     if df_me5a is not None:
-        col_monto_me5a = next((c for c in df_me5a.columns if 'valor' in c.lower() or 'monto' in c.lower()), 'Valor total')
-        col_ped_me5a = next((c for c in df_me5a.columns if 'pedido' in c.lower() and 'posición' not in c.lower() and 'solicitud' not in c.lower()), 'Pedido')
-        col_posped_me5a = next((c for c in df_me5a.columns if 'posició' in c.lower() or 'posicion' in c.lower()), 'Posición de pedido')
-        col_autor_me5a = next((c for c in df_me5a.columns if 'autor' in c.lower() or 'solicitante' in c.lower()), 'Autor')
-        col_centro_me5a = next((c for c in df_me5a.columns if 'centro' in c.lower()), 'Centro')
+        col_monto_me5a = auto_detect_col_smart(df_me5a, ['valor total', 'monto total', 'valor', 'monto']) or 'Valor total'
+        col_ped_me5a = auto_detect_col_smart(df_me5a, ['pedido']) or 'Pedido'
+        col_posped_me5a = auto_detect_col_smart(df_me5a, ['posición de pedido', 'posicion de pedido', 'pos. pedido']) or 'Posición de pedido'
+        col_autor_me5a = auto_detect_col_smart(df_me5a, ['autor', 'solicitante', 'área', 'area']) or 'Autor'
+        col_centro_me5a = auto_detect_col_smart(df_me5a, ['centro']) or 'Centro'
 
         df_me5a['Monto_Limpio'] = clean_numeric(df_me5a[col_monto_me5a]) if col_monto_me5a in df_me5a.columns else 0.0
         df_me5a['Es_PNNA'] = df_me5a[col_ped_me5a].isna() | (df_me5a[col_ped_me5a] == 0) | (df_me5a[col_ped_me5a].astype(str).str.strip() == '')
@@ -247,7 +288,7 @@ if df_me2m is not None or df_me5a is not None:
         if df_me5a_filt is not None:
             df_me5a_filt = df_me5a_filt[df_me5a_filt[col_centro_me5a].astype(str).isin(centros_sel)]
 
-    # Pre-calculo de tablas para exportación
+    # Pre-calculo de tablas para visualización y exportación
     ranking_centro = None
     grp_df = None
     pnna_area = None
