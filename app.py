@@ -46,8 +46,7 @@ SVG_ICONS = {
     "trophy": '<svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E11D48" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2z"/></svg>',
     "pie": '<svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E11D48" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>',
     "link": '<svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E11D48" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
-    "alert": '<svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
-    "download": '<svg class="svg-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'
+    "alert": '<svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
 }
 
 st.markdown(f'<div class="custom-title">{SVG_ICONS["report"]} Reporte de Compras Directas, PNNA & Cruce SAP</div>', unsafe_allow_html=True)
@@ -78,102 +77,127 @@ def clean_numeric(series):
     s = s.str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
     return pd.to_numeric(s, errors='coerce').fillna(0)
 
-# Función para generar el archivo Excel formateado con gráficos integrados
+# Función segura para generar el archivo Excel formateado con fallback automático
 def export_to_excel_styled(df_ranking, df_grupo, df_pnna, df_cruce, df_me2m_full, df_me5a_full):
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        workbook = writer.book
-        
-        # Formatos de celdas
-        fmt_header = workbook.add_format({
-            'bold': True, 'font_color': '#FFFFFF', 'bg_color': '#1E293B',
-            'border': 1, 'align': 'center', 'valign': 'vcenter'
-        })
-        fmt_currency = workbook.add_format({'num_format': '$ #,##0', 'border': 1})
-        fmt_integer = workbook.add_format({'num_format': '#,##0', 'border': 1, 'align': 'center'})
-        fmt_text = workbook.add_format({'border': 1})
+    
+    # Verificación de librerías para exportar a Excel sin fallar en Streamlit Cloud
+    has_xlsxwriter = False
+    try:
+        import xlsxwriter
+        engine = 'xlsxwriter'
+        has_xlsxwriter = True
+    except (ImportError, ModuleNotFoundError):
+        engine = None  # Utiliza el motor por defecto disponible (ej. openpyxl)
 
-        # 1. Hoja Ranking Compras Directas
-        if df_ranking is not None and not df_ranking.empty:
-            df_ranking.to_excel(writer, sheet_name='Ranking Centros', index=False)
-            ws = writer.sheets['Ranking Centros']
+    writer_kwargs = {'engine': engine} if engine else {}
+
+    with pd.ExcelWriter(output, **writer_kwargs) as writer:
+        if has_xlsxwriter:
+            workbook = writer.book
             
-            # Ancho de columnas y formato
-            ws.set_column('A:A', 12, fmt_integer)
-            ws.set_column('B:B', 16, fmt_text)
-            ws.set_column('C:C', 22, fmt_currency)
-            ws.set_column('D:D', 16, fmt_integer)
-            
-            for col_num, col_name in enumerate(df_ranking.columns):
-                ws.write(0, col_num, col_name, fmt_header)
-
-            # Insertar Gráfico de Barras Carmesí en Excel
-            chart1 = workbook.add_chart({'type': 'column'})
-            chart1.add_series({
-                'name': 'Monto Total ($)',
-                'categories': f'=Ranking Centros!$B$2:$B${min(21, len(df_ranking)+1)}',
-                'values': f'=Ranking Centros!$C$2:$C${min(21, len(df_ranking)+1)}',
-                'fill': {'color': '#E11D48'}
+            # Formatos de celdas estilizados
+            fmt_header = workbook.add_format({
+                'bold': True, 'font_color': '#FFFFFF', 'bg_color': '#1E293B',
+                'border': 1, 'align': 'center', 'valign': 'vcenter'
             })
-            chart1.set_title({'name': 'Top Compras Directas por Centro'})
-            chart1.set_x_axis({'name': 'Centro'})
-            chart1.set_y_axis({'name': 'Monto ($)'})
-            chart1.set_style(10)
-            ws.insert_chart('F2', chart1)
+            fmt_currency = workbook.add_format({'num_format': '$ #,##0', 'border': 1})
+            fmt_integer = workbook.add_format({'num_format': '#,##0', 'border': 1, 'align': 'center'})
+            fmt_text = workbook.add_format({'border': 1})
 
-        # 2. Hoja Grupos de Compra
-        if df_grupo is not None and not df_grupo.empty:
-            df_grupo.to_excel(writer, sheet_name='Grupos de Compra', index=False)
-            ws = writer.sheets['Grupos de Compra']
-            ws.set_column('A:A', 22, fmt_text)
-            ws.set_column('B:B', 22, fmt_currency)
-            
-            for col_num, col_name in enumerate(df_grupo.columns):
-                ws.write(0, col_num, col_name, fmt_header)
+            # 1. Hoja Ranking Compras Directas
+            if df_ranking is not None and not df_ranking.empty:
+                df_ranking.to_excel(writer, sheet_name='Ranking Centros', index=False)
+                ws = writer.sheets['Ranking Centros']
+                
+                ws.set_column('A:A', 12, fmt_integer)
+                ws.set_column('B:B', 16, fmt_text)
+                ws.set_column('C:C', 22, fmt_currency)
+                ws.set_column('D:D', 16, fmt_integer)
+                
+                for col_num, col_name in enumerate(df_ranking.columns):
+                    ws.write(0, col_num, col_name, fmt_header)
 
-            chart2 = workbook.add_chart({'type': 'column'})
-            chart2.add_series({
-                'name': 'Monto Total ($)',
-                'categories': f'=Grupos de Compra!$A$2:$A${min(12, len(df_grupo)+1)}',
-                'values': f'=Grupos de Compra!$B$2:$B${min(12, len(df_grupo)+1)}',
-                'fill': {'color': '#2563EB'}
-            })
-            chart2.set_title({'name': 'Monto por Grupo de Compra'})
-            ws.insert_chart('D2', chart2)
+                # Gráfico de Barras Carmesí en Excel
+                chart1 = workbook.add_chart({'type': 'column'})
+                chart1.add_series({
+                    'name': 'Monto Total ($)',
+                    'categories': f"='Ranking Centros'!$B$2:$B${min(21, len(df_ranking)+1)}",
+                    'values': f"='Ranking Centros'!$C$2:$C${min(21, len(df_ranking)+1)}",
+                    'fill': {'color': '#E11D48'}
+                })
+                chart1.set_title({'name': 'Top Compras Directas por Centro'})
+                chart1.set_x_axis({'name': 'Centro'})
+                chart1.set_y_axis({'name': 'Monto ($)'})
+                chart1.set_style(10)
+                ws.insert_chart('F2', chart1)
 
-        # 3. Hoja PNNA por Área
-        if df_pnna is not None and not df_pnna.empty:
-            df_pnna.to_excel(writer, sheet_name='PNNA por Área', index=False)
-            ws = writer.sheets['PNNA por Área']
-            ws.set_column('A:A', 22, fmt_text)
-            ws.set_column('B:B', 16, fmt_text)
-            ws.set_column('C:C', 22, fmt_currency)
-            ws.set_column('D:D', 16, fmt_integer)
+            # 2. Hoja Grupos de Compra
+            if df_grupo is not None and not df_grupo.empty:
+                df_grupo.to_excel(writer, sheet_name='Grupos de Compra', index=False)
+                ws = writer.sheets['Grupos de Compra']
+                ws.set_column('A:A', 22, fmt_text)
+                ws.set_column('B:B', 22, fmt_currency)
+                
+                for col_num, col_name in enumerate(df_grupo.columns):
+                    ws.write(0, col_num, col_name, fmt_header)
 
-            for col_num, col_name in enumerate(df_pnna.columns):
-                ws.write(0, col_num, col_name, fmt_header)
+                chart2 = workbook.add_chart({'type': 'column'})
+                chart2.add_series({
+                    'name': 'Monto Total ($)',
+                    'categories': f"='Grupos de Compra'!$A$2:$A${min(12, len(df_grupo)+1)}",
+                    'values': f"='Grupos de Compra'!$B$2:$B${min(12, len(df_grupo)+1)}",
+                    'fill': {'color': '#2563EB'}
+                })
+                chart2.set_title({'name': 'Monto por Grupo de Compra'})
+                ws.insert_chart('D2', chart2)
 
-            chart3 = workbook.add_chart({'type': 'column'})
-            chart3.add_series({
-                'name': 'Monto PNNA ($)',
-                'categories': f'=PNNA por Área!$A$2:$A${min(16, len(df_pnna)+1)}',
-                'values': f'=PNNA por Área!$C$2:$C${min(16, len(df_pnna)+1)}',
-                'fill': {'color': '#D97706'}
-            })
-            chart3.set_title({'name': 'Top PNNA por Área / Autor'})
-            ws.insert_chart('F2', chart3)
+            # 3. Hoja PNNA por Área
+            if df_pnna is not None and not df_pnna.empty:
+                df_pnna.to_excel(writer, sheet_name='PNNA por Área', index=False)
+                ws = writer.sheets['PNNA por Área']
+                ws.set_column('A:A', 22, fmt_text)
+                ws.set_column('B:B', 16, fmt_text)
+                ws.set_column('C:C', 22, fmt_currency)
+                ws.set_column('D:D', 16, fmt_integer)
 
-        # 4. Hoja Cruce SOLPED vs Pedido
-        if df_cruce is not None and not df_cruce.empty:
-            df_cruce.to_excel(writer, sheet_name='Cruce ME5A vs ME2M', index=False)
-            ws = writer.sheets['Cruce ME5A vs ME2M']
-            ws.set_column('A:Z', 18, fmt_text)
-            for col_num, col_name in enumerate(df_cruce.columns):
-                ws.write(0, col_num, col_name, fmt_header)
+                for col_num, col_name in enumerate(df_pnna.columns):
+                    ws.write(0, col_num, col_name, fmt_header)
 
-        # 5. Detalle ME2M Completo
-        if df_me2m_full is not None and not df_me2m_full.empty:
-            df_me2m_full.head(5000).to_excel(writer, sheet_name='Detalle ME2M', index=False)
+                chart3 = workbook.add_chart({'type': 'column'})
+                chart3.add_series({
+                    'name': 'Monto PNNA ($)',
+                    'categories': f"='PNNA por Área'!$A$2:$A${min(16, len(df_pnna)+1)}",
+                    'values': f"='PNNA por Área'!$C$2:$C${min(16, len(df_pnna)+1)}",
+                    'fill': {'color': '#D97706'}
+                })
+                chart3.set_title({'name': 'Top PNNA por Área / Autor'})
+                ws.insert_chart('F2', chart3)
+
+            # 4. Hoja Cruce SOLPED vs Pedido
+            if df_cruce is not None and not df_cruce.empty:
+                df_cruce.to_excel(writer, sheet_name='Cruce ME5A vs ME2M', index=False)
+                ws = writer.sheets['Cruce ME5A vs ME2M']
+                ws.set_column('A:Z', 18, fmt_text)
+                for col_num, col_name in enumerate(df_cruce.columns):
+                    ws.write(0, col_num, col_name, fmt_header)
+
+            # 5. Detalle ME2M Completo
+            if df_me2m_full is not None and not df_me2m_full.empty:
+                df_me2m_full.head(5000).to_excel(writer, sheet_name='Detalle ME2M', index=False)
+
+        else:
+            # Fallback seguro con openpyxl si xlsxwriter no estuviera en el servidor
+            if df_ranking is not None and not df_ranking.empty:
+                df_ranking.to_excel(writer, sheet_name='Ranking Centros', index=False)
+            if df_grupo is not None and not df_grupo.empty:
+                df_grupo.to_excel(writer, sheet_name='Grupos de Compra', index=False)
+            if df_pnna is not None and not df_pnna.empty:
+                df_pnna.to_excel(writer, sheet_name='PNNA por Área', index=False)
+            if df_cruce is not None and not df_cruce.empty:
+                df_cruce.to_excel(writer, sheet_name='Cruce ME5A vs ME2M', index=False)
+            if df_me2m_full is not None and not df_me2m_full.empty:
+                df_me2m_full.head(5000).to_excel(writer, sheet_name='Detalle ME2M', index=False)
 
     return output.getvalue()
 
