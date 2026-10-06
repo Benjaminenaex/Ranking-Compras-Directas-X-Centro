@@ -4,7 +4,7 @@ import plotly.express as px
 
 st.set_page_config(page_title="Dashboard Compras Directas", layout="wide")
 
-# CSS para evitar que las tarjetas de métricas corten o acoplen números grandes
+# CSS para métricas grandes, estilos de títulos y renderizado limpio de iconos HTML SVG
 st.markdown("""
     <style>
     [data-testid="stMetricValue"] {
@@ -13,10 +13,41 @@ st.markdown("""
         word-break: break-word !important;
         line-height: 1.2 !important;
     }
+    .custom-title {
+        display: flex;
+        align-items: center;
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 1.2rem;
+    }
+    .custom-header {
+        display: flex;
+        align-items: center;
+        font-size: 1.35rem;
+        font-weight: 600;
+        margin-top: 1rem;
+        margin-bottom: 0.75rem;
+    }
+    .svg-icon {
+        display: inline-block;
+        vertical-align: middle;
+        margin-right: 10px;
+        flex-shrink: 0;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 Reporte de Compras Directas y Ranking por Centro")
+# Dibujos minimalistas en formato SVG HTML (sin emojis)
+SVG_ICONS = {
+    "chart": '<svg class="svg-icon" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#E11D48" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>',
+    "trophy": '<svg class="svg-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#E11D48" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2z"/></svg>',
+    "pie": '<svg class="svg-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#E11D48" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>',
+    "gear": '<svg class="svg-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F43F5E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+    "warning": '<svg class="svg-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+}
+
+# Título Principal con dibujo SVG
+st.markdown(f'<div class="custom-title">{SVG_ICONS["chart"]} Reporte de Compras Directas y Ranking por Centro</div>', unsafe_allow_html=True)
 
 # Carga de archivos en la barra lateral
 st.sidebar.header("1. Cargar Archivos SAP")
@@ -65,7 +96,7 @@ if df_me2m is not None:
     auto_area = auto_detect_col(df_me2m, ['solicitante', 'área', 'area', 'coste', 'ceco'])
 
     # Selector manual de columnas en el Sidebar
-    with st.sidebar.expander("⚙️ Configuración de Columnas", expanded=False):
+    with st.sidebar.expander("Configuración de Columnas", expanded=False):
         col_centro = st.selectbox("Columna Centro", options=all_cols, index=all_cols.index(auto_centro) if auto_centro in all_cols else 0)
         col_monto = st.selectbox("Columna Monto / Valor", options=["[Ninguna]"] + all_cols, index=all_cols.index(auto_monto)+1 if auto_monto in all_cols else 0)
         col_grupo = st.selectbox("Columna Grupo de Compra", options=["[Ninguna]"] + all_cols, index=all_cols.index(auto_grupo)+1 if auto_grupo in all_cols else 0)
@@ -104,7 +135,7 @@ if df_me2m is not None:
     st.markdown("---")
 
     # 1. Ranking Compras Directas x Centro
-    st.subheader("🏆 Ranking Compras Directas x Centro")
+    st.markdown(f'<div class="custom-header">{SVG_ICONS["trophy"]} Ranking Compras Directas x Centro</div>', unsafe_allow_html=True)
     
     if col_monto and col_centro:
         ranking_centro = (
@@ -129,7 +160,7 @@ if df_me2m is not None:
                 color='Monto Total ($)',
                 color_continuous_scale="Viridis"
             )
-            # Se oculta la barra de color continua para evitar que los números 50M/20M se acoplen
+            # Ocultar la barra de color continua para evitar que las etiquetas numéricas se sobrepongan
             fig_centro.update_layout(
                 coloraxis_showscale=False,
                 xaxis_type='category',
@@ -144,11 +175,11 @@ if df_me2m is not None:
                 use_container_width=True
             )
     else:
-        st.warning("⚠️ Selecciona las columnas requeridas en '⚙️ Configuración de Columnas'.")
+        st.warning("Selecciona las columnas requeridas en la Configuración de Columnas.")
 
     # 2. Compras directas por Grupo de Compra y Áreas
     st.markdown("---")
-    st.subheader("📌 Análisis por Grupo de Compra y Áreas")
+    st.markdown(f'<div class="custom-header">{SVG_ICONS["pie"]} Análisis por Grupo de Compra y Áreas</div>', unsafe_allow_html=True)
 
     tab1, tab2 = st.tabs(["Por Grupo de Compra", "Por Área / Solicitante"])
 
