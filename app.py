@@ -131,6 +131,27 @@ st.markdown("""
     }
     .step-title { font-weight: 700; font-size: 1.05rem; margin-bottom: 4px; }
     .step-text { opacity: 0.8; font-size: 0.92rem; }
+    /* Tarjetas del diagnóstico Ariba: el texto se ajusta en varias líneas, nunca se corta */
+    .diag-card {
+        border: 1px solid rgba(148,163,184,0.30);
+        border-radius: 12px;
+        padding: 14px 16px;
+        height: 100%;
+        min-height: 150px;
+        background: rgba(148,163,184,0.06);
+    }
+    .diag-title { font-weight: 700; font-size: 0.98rem; line-height: 1.25; white-space: normal; }
+    .diag-value { font-size: 1.9rem; font-weight: 800; margin: 6px 0 4px 0; }
+    .diag-text { font-size: 0.85rem; opacity: 0.75; line-height: 1.3; white-space: normal; }
+    .diag-summary {
+        border-left: 4px solid #F59E0B;
+        padding: 10px 14px;
+        margin: 4px 0 14px 0;
+        border-radius: 6px;
+        background: rgba(245,158,11,0.08);
+        font-size: 0.95rem;
+        line-height: 1.4;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -674,11 +695,39 @@ if df_me2m_filt is not None:
     # Diagnóstico de dónde vienen (o por qué faltan) los pedidos Ariba
     sin_ariba = int(_dato(PLAT_ARIBA, 'Cant. Pedidos')) == 0
     with st.expander("🔍 ¿De dónde salen los pedidos Ariba?", expanded=sin_ariba):
-        d1, d2, d3, d4 = st.columns(4)
-        d1.metric("Ariba en ME2M (total)", f"{diag_ariba['me2m_total']:,}")
-        d2.metric("Ariba en ME2M con AD", f"{diag_ariba['me2m_ad']:,}")
-        d3.metric("Ariba en ME5A (con pedido)", f"{diag_ariba['me5a_total']:,}")
-        d4.metric("Agregados desde ME5A", f"{diag_ariba['me5a_agregados']:,}")
+        # Resumen en una frase, en lenguaje simple
+        n_me2m = diag_ariba['me2m_total']
+        n_me5a = diag_ariba['me5a_agregados']
+        if n_me2m == 0 and n_me5a > 0:
+            resumen = (f"Los <b>{n_me5a:,}</b> pedidos Ariba vienen de la <b>ME5A</b>, "
+                       "porque el archivo ME2M no trae pedidos que empiecen con 3.")
+        elif n_me2m > 0 and n_me5a > 0:
+            resumen = (f"Hay <b>{n_me2m:,}</b> pedidos Ariba en la <b>ME2M</b> y se sumaron "
+                       f"<b>{n_me5a:,}</b> más que solo aparecen en la <b>ME5A</b>.")
+        elif n_me2m > 0:
+            resumen = f"Los <b>{n_me2m:,}</b> pedidos Ariba vienen de la <b>ME2M</b>."
+        else:
+            resumen = "No se encontraron pedidos Ariba (ID que empiece con 3) en ninguno de los archivos."
+        st.markdown(f'<div class="diag-summary">{resumen}</div>', unsafe_allow_html=True)
+
+        tarjetas_diag = [
+            ("Pedidos Ariba en ME2M", n_me2m,
+             "Pedidos del archivo ME2M cuyo número empieza con 3."),
+            ("De esos, con licitación AD", diag_ariba['me2m_ad'],
+             "Pedidos Ariba de ME2M marcados como compra directa (Licitación empieza con «AD»)."),
+            ("Pedidos Ariba en ME5A", diag_ariba['me5a_total'],
+             "Solicitudes (SOLPED) de la ME5A que ya tienen un pedido que empieza con 3."),
+            ("Sumados desde ME5A", n_me5a,
+             "Pedidos Ariba que no están en ME2M y se agregaron al análisis tomándolos de la ME5A."),
+        ]
+        for col, (titulo, valor, texto) in zip(st.columns(4), tarjetas_diag):
+            col.markdown(
+                f'<div class="diag-card"><div class="diag-title">{titulo}</div>'
+                f'<div class="diag-value">{valor:,}</div>'
+                f'<div class="diag-text">{texto}</div></div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown("")
 
         if diag_ariba['me2m_total'] > diag_ariba['me2m_ad'] and not incluir_ariba_sin_ad:
             st.warning("Hay pedidos Ariba en ME2M sin 'AD' en Licitación. Activa la opción correspondiente en "
@@ -704,8 +753,8 @@ if df_me2m_filt is not None:
                 st.info("Ningún archivo contiene valores que empiecen con 3. Revisa que la exportación de ME2M "
                         "incluya los pedidos creados desde Ariba (variante / clase de documento).")
         else:
-            st.caption("Ariba = ID del pedido que comienza con 3. Se cuentan los pedidos Ariba de ME2M "
-                       "y, si corresponde, los de ME5A que no aparecen en ME2M.")
+            st.caption("ℹ️ Regla: un pedido es **Ariba** si su número empieza con **3**, y **SAP HANA** si empieza "
+                       "con **4** (45 o 47). Para los pedidos que vienen de la ME5A, el monto usado es el de la SOLPED.")
 
     cant_otro = int(_dato(PLAT_OTRO, 'Cant. Pedidos'))
     if cant_otro > 0:
