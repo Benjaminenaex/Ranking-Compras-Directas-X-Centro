@@ -19,6 +19,8 @@ PREFIJOS_ARIBA = ("3",)
 PREFIJOS_SAP_HANA = ("4", "45", "47")
 
 PLAT_TODAS = "Todas"
+ESTADO_CRUZADO = "✅ Cruzado con ME2M"
+ESTADO_SOLO_ME5A = "⚠️ Pedido no está en ME2M"
 PLAT_ARIBA = "Ariba"
 PLAT_HANA = "SAP HANA"
 PLAT_OTRO = "Sin clasificar"
@@ -765,11 +767,28 @@ if df_me5a_filt is not None and df_me2m_filt is not None:
     df_me2m_proc['Pedido_Key'] = pd.to_numeric(df_me2m_proc[col_doc_me2m], errors='coerce').fillna(0).astype(int)
     df_me2m_proc['Pos_Key'] = pd.to_numeric(df_me2m_proc[col_pos_me2m], errors='coerce').fillna(0).astype(int)
 
+    # Cruce desde la SOLPED (ME5A) hacia el pedido (ME2M).
+    # Se usa LEFT JOIN para no perder las SOLPED cuyo pedido (p. ej. pedidos Ariba) no viene en la ME2M.
     merged_df = pd.merge(
         df_me5a_proc, df_me2m_proc,
         on=['Pedido_Key', 'Pos_Key'],
-        how='inner', suffixes=('_SOLPED', '_PEDIDO')
+        how='left', suffixes=('_SOLPED', '_PEDIDO'),
+        indicator=True,
     )
+    merged_df['Estado cruce'] = merged_df['_merge'].map(
+        {'both': ESTADO_CRUZADO, 'left_only': ESTADO_SOLO_ME5A}
+    ).astype(object)
+    merged_df = merged_df.drop(columns=['_merge'])
+
+    # Plataforma: la del pedido en ME2M; si no cruzó, se toma del N° de pedido en la ME5A
+    if 'Plataforma' in merged_df.columns:
+        merged_df['Plataforma'] = merged_df['Plataforma'].fillna(merged_df['Plataforma_Pedido'])
+    else:
+        merged_df['Plataforma'] = merged_df['Plataforma_Pedido']
+
+    # Filtro de plataforma (Ariba / SAP HANA) aplicado también al cruce
+    if plataforma_sel != PLAT_TODAS:
+        merged_df = merged_df[merged_df['Plataforma'] == plataforma_sel]
 
 # =====================================================================
 # BARRA LATERAL: EXPORTAR
@@ -801,7 +820,7 @@ cant_cd = df_cd.shape[0] if df_cd is not None else 0
 monto_pnna = df_me5a_filt[df_me5a_filt['Es_PNNA']]['Monto_Limpio'].sum() if df_me5a_filt is not None else 0.0
 cant_pnna = df_me5a_filt[df_me5a_filt['Es_PNNA']].shape[0] if df_me5a_filt is not None else 0
 
-kpi1.metric("💰 Monto Compras Directas", f"${monto_cd:,.0f}", help=f"Plataforma: {plataforma_sel}")
+kpi1.metric("💰 Monto Directas", f"${monto_cd:,.0f}", help=f"Plataforma: {plataforma_sel}")
 kpi2.metric("🧾 Órdenes Directas", f"{cant_cd:,}", help=f"Plataforma: {plataforma_sel}")
 kpi3.metric("⏳ Monto PNNA", f"${monto_pnna:,.0f}")
 kpi4.metric("📋 SOLPEDs PNNA", f"{cant_pnna:,}")
@@ -975,23 +994,46 @@ with tab5:
     st.markdown(f'<div class="custom-header">{SVG_ICONS["link"]} Cruce Trazable: SOLPEDs (ME5A) vs Pedidos (ME2M){etiqueta_plat}</div>', unsafe_allow_html=True)
 
     if merged_df is not None and not merged_df.empty:
-        st.success(f"Se han cruzado exitosamente **{len(merged_df):,}** registros entre ME5A y ME2M.")
+        n_cruzados = int((merged_df['Estado cruce'] == ESTADO_CRUZADO).sum())
+        n_solo_me5a = int((merged_df['Estado cruce'] == ESTADO_SOLO_ME5A).sum())
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("📋 SOLPEDs con pedido", f"{len(merged_df):,}")
+        m2.metric("✅ Cruzadas con ME2M", f"{n_cruzados:,}")
+        m3.metric("⚠️ Pedido no está en ME2M", f"{n_solo_me5a:,}")
+
+        if n_solo_me5a > 0:
+            st.caption("«Pedido no está en ME2M»: la SOLPED tiene N° de pedido en la ME5A, pero ese pedido no viene "
+                       "en el archivo ME2M (habitual en pedidos Ariba). Se muestran igual para que puedas trazarlos.")
+
+        f1, f2 = st.columns([1, 2])
+        with f1:
+            estado_sel = st.selectbox(
+                "Estado del cruce",
+                ["Todos", ESTADO_CRUZADO, ESTADO_SOLO_ME5A],
+                key="estado_cruce",
+            )
+        with f2:
+            texto_cruce = st.text_input("Buscar en el cruce", placeholder="Ej: N° SOLPED, pedido, autor…", key="busq_cruce")
 
         cols_show = [
-            'Solicitud de pedido', 'Pedido_Key', 'Pos_Key', 'Plataforma',
+            'Estado cruce', 'Solicitud de pedido', 'Pedido_Key', 'Pos_Key', 'Plataforma',
             col_autor_me5a, 'Proveedor/Centro suministrador',
-            col_licita_me2m, 'Centro_PEDIDO', 'Monto_Limpio_SOLPED', 'Monto_Limpio_PEDIDO'
+            col_licita_me2m, 'Centro_SOLPED', 'Centro_PEDIDO', 'Monto_Limpio_SOLPED', 'Monto_Limpio_PEDIDO'
         ]
         cols_avail = list(dict.fromkeys([c for c in cols_show if c in merged_df.columns]))
 
         df_cruce_disp = merged_df[cols_avail].rename(columns={
             'Pedido_Key': 'Pedido',
             'Pos_Key': 'Posición',
+            'Centro_SOLPED': 'Centro SOLPED',
+            'Centro_PEDIDO': 'Centro Pedido',
             'Monto_Limpio_SOLPED': 'Monto SOLPED ($)',
             'Monto_Limpio_PEDIDO': 'Monto Pedido ($)',
         })
 
-        texto_cruce = st.text_input("Buscar en el cruce", placeholder="Ej: N° SOLPED, pedido, autor…", key="busq_cruce")
+        if estado_sel != "Todos":
+            df_cruce_disp = df_cruce_disp[df_cruce_disp['Estado cruce'] == estado_sel]
         df_cruce_disp = buscar_en_df(df_cruce_disp, texto_cruce)
         st.caption(f"{len(df_cruce_disp):,} registros")
 
@@ -1003,4 +1045,5 @@ with tab5:
     elif df_me5a is None or df_me2m is None:
         st.info("Para realizar el cruce unificado, debes subir **ambos archivos (ME5A y ME2M)** en la barra lateral.")
     else:
-        st.info("No se encontraron coincidencias entre ME5A y ME2M para los filtros seleccionados.")
+        st.info(f"No hay SOLPEDs con pedido {plataforma_sel if plataforma_sel != PLAT_TODAS else ''} "
+                "para los filtros seleccionados.")
