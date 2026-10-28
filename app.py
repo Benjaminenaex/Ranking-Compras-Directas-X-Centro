@@ -211,11 +211,29 @@ def columnas_con_ids_ariba(df):
     return pd.DataFrame(resultado).sort_values('Valores que empiezan con 3', ascending=False) if resultado else pd.DataFrame()
 
 
+# Streamlit no permite aplicar estilos (Pandas Styler) a tablas muy grandes:
+# por sobre este número de celdas se muestra una versión con montos como texto.
+MAX_CELDAS_ESTILO = 150_000
+
+
 def estilo_montos(df, cols_monto=(), cols_enteros=()):
-    """Formatea montos con $ y separador de miles manteniendo el orden numérico de la tabla."""
-    fmt = {c: "${:,.0f}" for c in cols_monto if c in df.columns}
-    fmt.update({c: "{:,.0f}" for c in cols_enteros if c in df.columns})
-    return df.style.format(fmt, na_rep="-")
+    """Formatea montos con $ y separador de miles.
+    - Tablas chicas: usa Styler (mantiene el orden numérico al ordenar columnas).
+    - Tablas grandes: convierte los montos a texto para evitar el error de Streamlit por exceso de celdas."""
+    cols_monto = [c for c in cols_monto if c in df.columns]
+    cols_enteros = [c for c in cols_enteros if c in df.columns]
+
+    if df.size <= MAX_CELDAS_ESTILO:
+        fmt = {c: "${:,.0f}" for c in cols_monto}
+        fmt.update({c: "{:,.0f}" for c in cols_enteros})
+        return df.style.format(fmt, na_rep="-")
+
+    df_txt = df.copy()
+    for c in cols_monto:
+        df_txt[c] = pd.to_numeric(df_txt[c], errors='coerce').map(lambda x: f"${x:,.0f}" if pd.notna(x) else "-")
+    for c in cols_enteros:
+        df_txt[c] = pd.to_numeric(df_txt[c], errors='coerce').map(lambda x: f"{x:,.0f}" if pd.notna(x) else "-")
+    return df_txt
 
 
 def buscar_en_df(df, texto):
@@ -893,7 +911,7 @@ with tab2:
         df_det = buscar_en_df(df_cd[cols_det], texto_busq).rename(columns={'Monto_Limpio': 'Monto ($)'})
         st.caption(f"{len(df_det):,} registros")
         st.dataframe(
-            estilo_montos(df_det, cols_monto=['Monto ($)']) if len(df_det) <= 50000 else df_det,
+            estilo_montos(df_det, cols_monto=['Monto ($)']),
             hide_index=True, use_container_width=True,
         )
     elif df_me2m is None:
@@ -978,8 +996,7 @@ with tab5:
         st.caption(f"{len(df_cruce_disp):,} registros")
 
         st.dataframe(
-            estilo_montos(df_cruce_disp, cols_monto=['Monto SOLPED ($)', 'Monto Pedido ($)'])
-            if len(df_cruce_disp) <= 50000 else df_cruce_disp,
+            estilo_montos(df_cruce_disp, cols_monto=['Monto SOLPED ($)', 'Monto Pedido ($)']),
             use_container_width=True,
             hide_index=True,
         )
