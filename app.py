@@ -190,6 +190,27 @@ def clasificar_plataforma(series):
     return plataforma
 
 
+def a_texto(series):
+    """Convierte una columna a texto limpio (sin '.0' de Excel), dejando vacíos como NaN."""
+    s = series.astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
+    return s.where(series.notna() & (s != '') & (s.str.lower() != 'nan'))
+
+
+@st.cache_data(show_spinner=False)
+def columnas_con_ids_ariba(df):
+    """Busca en todas las columnas valores con forma de ID Ariba (empiezan con 3 y tienen 6+ dígitos)."""
+    resultado = []
+    for c in df.columns:
+        s = df[c].dropna().astype(str).str.strip().str.replace(r'\.0$', '', regex=True).str.lstrip('0')
+        if s.empty:
+            continue
+        n3 = int(s.str.match(r'^3\d{5,}$').sum())
+        n4 = int(s.str.match(r'^4\d{5,}$').sum())
+        if n3 > 0:
+            resultado.append({'Columna': c, 'Valores que empiezan con 3': n3, 'Valores que empiezan con 4': n4})
+    return pd.DataFrame(resultado).sort_values('Valores que empiezan con 3', ascending=False) if resultado else pd.DataFrame()
+
+
 def estilo_montos(df, cols_monto=(), cols_enteros=()):
     """Formatea montos con $ y separador de miles manteniendo el orden numérico de la tabla."""
     fmt = {c: "${:,.0f}" for c in cols_monto if c in df.columns}
@@ -369,7 +390,7 @@ def export_to_excel_styled(df_ranking, df_grupo, df_pnna, df_cruce, df_me2m_full
 
             # 5. Detalle ME2M Completo
             if df_me2m_full is not None and not df_me2m_full.empty:
-                write_sheet_autofit(writer, df_me2m_full.head(5000), 'Detalle ME2M', workbook)
+                write_sheet_autofit(writer, df_me2m_full.head(5000), 'Detalle Pedidos', workbook)
 
         else:
             # Fallback seguro openpyxl si xlsxwriter no está disponible
@@ -384,7 +405,7 @@ def export_to_excel_styled(df_ranking, df_grupo, df_pnna, df_cruce, df_me2m_full
             if df_cruce is not None and not df_cruce.empty:
                 df_cruce.to_excel(writer, sheet_name='Cruce ME5A vs ME2M', index=False)
             if df_me2m_full is not None and not df_me2m_full.empty:
-                df_me2m_full.head(5000).to_excel(writer, sheet_name='Detalle ME2M', index=False)
+                df_me2m_full.head(5000).to_excel(writer, sheet_name='Detalle Pedidos', index=False)
 
     return output.getvalue()
 
@@ -450,20 +471,38 @@ if df_me2m is not None:
     col_doc_me2m = next((c for c in df_me2m.columns if 'documento' in c.lower() and 'fecha' not in c.lower()), 'Documento compras')
     col_pos_me2m = next((c for c in df_me2m.columns if 'posición' in c.lower() or 'posicion' in c.lower()), 'Posición')
 
-    # Columna del ID usado para clasificar la plataforma (editable por el usuario)
-    with st.sidebar.expander("⚙️ Configuración avanzada"):
+    # Configuración de la clasificación Ariba / SAP HANA (editable por el usuario)
+    with st.sidebar.expander("⚙️ Configuración Ariba / SAP HANA"):
         opciones_id = list(df_me2m.columns)
         idx_default = opciones_id.index(col_doc_me2m) if col_doc_me2m in opciones_id else 0
         col_id_plataforma = st.selectbox(
-            "Columna ID del pedido (para Ariba / SAP HANA)",
+            "Columna ID del pedido",
             options=opciones_id,
             index=idx_default,
             help="Se evalúa el primer dígito: 3 = Ariba · 4 / 45 / 47 = SAP HANA.",
         )
+        incluir_ariba_sin_ad = st.checkbox(
+            "Contar pedidos Ariba (ID 3…) aunque su Licitación no empiece con AD",
+            value=True,
+            help="Los pedidos que nacen en Ariba normalmente no traen 'AD' en Licitación, por eso quedaban fuera.",
+        )
+        incluir_ariba_me5a = st.checkbox(
+            "Agregar pedidos Ariba que están en ME5A pero no en ME2M",
+            value=True,
+            help="Toma el N° de pedido de la ME5A con Ariba. El monto usado es el valor de la SOLPED.",
+        )
 
     df_me2m['Monto_Limpio'] = clean_numeric(df_me2m[col_monto_me2m]) if col_monto_me2m in df_me2m.columns else 0.0
-    df_me2m['Es_Compra_Directa'] = df_me2m[col_licita_me2m].astype(str).str.upper().str.startswith('AD') if col_licita_me2m in df_me2m.columns else False
+    if col_licita_me2m in df_me2m.columns:
+        df_me2m['Es_AD'] = df_me2m[col_licita_me2m].astype(str).str.strip().str.upper().str.startswith('AD')
+    else:
+        df_me2m['Es_AD'] = False
     df_me2m['Plataforma'] = clasificar_plataforma(df_me2m[col_id_plataforma])
+    df_me2m['Es_Compra_Directa'] = df_me2m['Es_AD'] | ((df_me2m['Plataforma'] == PLAT_ARIBA) & incluir_ariba_sin_ad)
+    df_me2m['Fuente'] = 'ME2M'
+    for _c in [col_centro_me2m, col_grp_me2m]:
+        if _c in df_me2m.columns:
+            df_me2m[_c] = a_texto(df_me2m[_c])
 
 # =====================================================================
 # PROCESAMIENTO ME5A
@@ -477,6 +516,47 @@ if df_me5a is not None:
 
     df_me5a['Monto_Limpio'] = clean_numeric(df_me5a[col_monto_me5a]) if col_monto_me5a in df_me5a.columns else 0.0
     df_me5a['Es_PNNA'] = df_me5a[col_ped_me5a].isna() | (df_me5a[col_ped_me5a] == 0) | (df_me5a[col_ped_me5a].astype(str).str.strip() == '')
+    if col_centro_me5a in df_me5a.columns:
+        df_me5a[col_centro_me5a] = a_texto(df_me5a[col_centro_me5a])
+    df_me5a['Plataforma_Pedido'] = clasificar_plataforma(df_me5a[col_ped_me5a]) if col_ped_me5a in df_me5a.columns else PLAT_OTRO
+
+# =====================================================================
+# PEDIDOS ARIBA: diagnóstico y rescate desde ME5A
+# =====================================================================
+diag_ariba = {'me2m_total': 0, 'me2m_ad': 0, 'me5a_total': 0, 'me5a_extra': 0, 'me5a_agregados': 0}
+
+if df_me2m is not None:
+    es_ariba_me2m = df_me2m['Plataforma'] == PLAT_ARIBA
+    diag_ariba['me2m_total'] = int(es_ariba_me2m.sum())
+    diag_ariba['me2m_ad'] = int((es_ariba_me2m & df_me2m['Es_AD']).sum())
+
+if df_me2m is not None and df_me5a is not None and col_ped_me5a in df_me5a.columns:
+    ariba_me5a = df_me5a[(~df_me5a['Es_PNNA']) & (df_me5a['Plataforma_Pedido'] == PLAT_ARIBA)].copy()
+    diag_ariba['me5a_total'] = len(ariba_me5a)
+
+    if not ariba_me5a.empty:
+        ids_me2m = set(pd.to_numeric(df_me2m[col_id_plataforma], errors='coerce').dropna().astype('int64'))
+        ariba_me5a['_ped'] = pd.to_numeric(ariba_me5a[col_ped_me5a], errors='coerce')
+        ariba_me5a = ariba_me5a[ariba_me5a['_ped'].notna() & ~ariba_me5a['_ped'].isin(ids_me2m)]
+        diag_ariba['me5a_extra'] = len(ariba_me5a)
+
+        if incluir_ariba_me5a and not ariba_me5a.empty:
+            col_grp_me5a = next((c for c in df_me5a.columns if 'grupo' in c.lower()), None)
+            filas = pd.DataFrame(index=ariba_me5a.index)
+            filas[col_id_plataforma] = ariba_me5a['_ped'].astype('int64')
+            filas[col_doc_me2m] = ariba_me5a['_ped'].astype('int64')
+            filas[col_pos_me2m] = (pd.to_numeric(ariba_me5a[col_posped_me5a], errors='coerce')
+                                   if col_posped_me5a in ariba_me5a.columns else None)
+            filas[col_centro_me2m] = ariba_me5a[col_centro_me5a] if col_centro_me5a in ariba_me5a.columns else None
+            filas[col_grp_me2m] = (a_texto(ariba_me5a[col_grp_me5a]) if col_grp_me5a else 'Sin grupo (ME5A)')
+            filas[col_licita_me2m] = 'Ariba (desde ME5A)'
+            filas['Monto_Limpio'] = ariba_me5a['Monto_Limpio']
+            filas['Es_AD'] = False
+            filas['Plataforma'] = PLAT_ARIBA
+            filas['Es_Compra_Directa'] = True
+            filas['Fuente'] = 'ME5A'
+            df_me2m = pd.concat([df_me2m, filas.reset_index(drop=True)], ignore_index=True)
+            diag_ariba['me5a_agregados'] = len(filas)
 
 # =====================================================================
 # BARRA LATERAL: FILTROS
@@ -571,6 +651,42 @@ if df_me2m_filt is not None:
                 args=(nombre,),
             )
 
+    # Diagnóstico de dónde vienen (o por qué faltan) los pedidos Ariba
+    sin_ariba = int(_dato(PLAT_ARIBA, 'Cant. Pedidos')) == 0
+    with st.expander("🔍 ¿De dónde salen los pedidos Ariba?", expanded=sin_ariba):
+        d1, d2, d3, d4 = st.columns(4)
+        d1.metric("Ariba en ME2M (total)", f"{diag_ariba['me2m_total']:,}")
+        d2.metric("Ariba en ME2M con AD", f"{diag_ariba['me2m_ad']:,}")
+        d3.metric("Ariba en ME5A (con pedido)", f"{diag_ariba['me5a_total']:,}")
+        d4.metric("Agregados desde ME5A", f"{diag_ariba['me5a_agregados']:,}")
+
+        if diag_ariba['me2m_total'] > diag_ariba['me2m_ad'] and not incluir_ariba_sin_ad:
+            st.warning("Hay pedidos Ariba en ME2M sin 'AD' en Licitación. Activa la opción correspondiente en "
+                       "**⚙️ Configuración Ariba / SAP HANA** para incluirlos.")
+        if diag_ariba['me5a_extra'] > 0 and not incluir_ariba_me5a:
+            st.warning(f"Hay {diag_ariba['me5a_extra']:,} registros Ariba en ME5A que no están en ME2M. "
+                       "Activa la opción correspondiente en **⚙️ Configuración Ariba / SAP HANA** para incluirlos.")
+        if sin_ariba:
+            st.error(f"No se encontraron IDs que empiecen con 3 en la columna «{col_id_plataforma}» (ME2M) "
+                     "ni en la columna de pedido de la ME5A. Abajo están las columnas donde sí aparecen "
+                     "valores que empiezan con 3: elige la correcta en **⚙️ Configuración Ariba / SAP HANA**.")
+            cols_busqueda = [c for c in df_me2m.columns if c not in ('Monto_Limpio', 'Es_AD', 'Es_Compra_Directa', 'Plataforma', 'Fuente')]
+            cand = columnas_con_ids_ariba(df_me2m[df_me2m['Fuente'] == 'ME2M'][cols_busqueda])
+            if not cand.empty:
+                st.markdown("**ME2M – columnas con valores que empiezan con 3:**")
+                st.dataframe(cand, hide_index=True, use_container_width=True)
+            if df_me5a is not None:
+                cand5 = columnas_con_ids_ariba(df_me5a.drop(columns=['Monto_Limpio', 'Es_PNNA', 'Plataforma_Pedido'], errors='ignore'))
+                if not cand5.empty:
+                    st.markdown("**ME5A – columnas con valores que empiezan con 3:**")
+                    st.dataframe(cand5, hide_index=True, use_container_width=True)
+            if cand.empty and (df_me5a is None or cand5.empty):
+                st.info("Ningún archivo contiene valores que empiecen con 3. Revisa que la exportación de ME2M "
+                        "incluya los pedidos creados desde Ariba (variante / clase de documento).")
+        else:
+            st.caption("Ariba = ID del pedido que comienza con 3. Se cuentan los pedidos Ariba de ME2M "
+                       "y, si corresponde, los de ME5A que no aparecen en ME2M.")
+
     cant_otro = int(_dato(PLAT_OTRO, 'Cant. Pedidos'))
     if cant_otro > 0:
         st.caption(
@@ -627,7 +743,7 @@ if df_me5a_filt is not None and df_me2m_filt is not None:
     df_me5a_proc['Pedido_Key'] = pd.to_numeric(df_me5a_proc[col_ped_me5a], errors='coerce').fillna(0).astype(int)
     df_me5a_proc['Pos_Key'] = pd.to_numeric(df_me5a_proc[col_posped_me5a], errors='coerce').fillna(0).astype(int)
 
-    df_me2m_proc = df_me2m_filt.copy()
+    df_me2m_proc = df_me2m_filt[df_me2m_filt['Fuente'] == 'ME2M'].copy()
     df_me2m_proc['Pedido_Key'] = pd.to_numeric(df_me2m_proc[col_doc_me2m], errors='coerce').fillna(0).astype(int)
     df_me2m_proc['Pos_Key'] = pd.to_numeric(df_me2m_proc[col_pos_me2m], errors='coerce').fillna(0).astype(int)
 
@@ -656,6 +772,10 @@ st.sidebar.download_button(
 # KPIs
 # =====================================================================
 etiqueta_plat = "" if plataforma_sel == PLAT_TODAS else f" · {plataforma_sel}"
+st.markdown(
+    f"**Mostrando:** <span style='color:{COLORES_PLATAFORMA.get(plataforma_sel)}; font-weight:800;'>{plataforma_sel}</span>",
+    unsafe_allow_html=True,
+)
 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
 monto_cd = df_cd['Monto_Limpio'].sum() if df_cd is not None else 0.0
@@ -663,10 +783,10 @@ cant_cd = df_cd.shape[0] if df_cd is not None else 0
 monto_pnna = df_me5a_filt[df_me5a_filt['Es_PNNA']]['Monto_Limpio'].sum() if df_me5a_filt is not None else 0.0
 cant_pnna = df_me5a_filt[df_me5a_filt['Es_PNNA']].shape[0] if df_me5a_filt is not None else 0
 
-kpi1.metric(f"💰 Monto Compras Directas{etiqueta_plat}", f"${monto_cd:,.0f}")
-kpi2.metric(f"🧾 Órdenes Directas{etiqueta_plat}", f"{cant_cd:,}")
-kpi3.metric("⏳ Monto PNNA Pendiente", f"${monto_pnna:,.0f}")
-kpi4.metric("📋 SOLPEDs en PNNA", f"{cant_pnna:,}")
+kpi1.metric("💰 Monto Compras Directas", f"${monto_cd:,.0f}", help=f"Plataforma: {plataforma_sel}")
+kpi2.metric("🧾 Órdenes Directas", f"{cant_cd:,}", help=f"Plataforma: {plataforma_sel}")
+kpi3.metric("⏳ Monto PNNA", f"${monto_pnna:,.0f}")
+kpi4.metric("📋 SOLPEDs PNNA", f"{cant_pnna:,}")
 
 st.markdown("")
 
@@ -767,7 +887,7 @@ with tab2:
 
         st.markdown(f"#### 🧾 Detalle de compras directas · {plataforma_sel}")
         cols_det = [c for c in [col_id_plataforma, col_doc_me2m, col_pos_me2m, 'Plataforma', col_centro_me2m,
-                                col_grp_me2m, col_licita_me2m, 'Monto_Limpio'] if c in df_cd.columns]
+                                col_grp_me2m, col_licita_me2m, 'Fuente', 'Monto_Limpio'] if c in df_cd.columns]
         cols_det = list(dict.fromkeys(cols_det))  # quita duplicados manteniendo orden
         texto_busq = st.text_input("Buscar en el detalle", placeholder="Ej: N° de pedido, centro, grupo…", key="busq_detalle")
         df_det = buscar_en_df(df_cd[cols_det], texto_busq).rename(columns={'Monto_Limpio': 'Monto ($)'})
