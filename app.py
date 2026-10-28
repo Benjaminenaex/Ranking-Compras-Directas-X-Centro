@@ -5,7 +5,7 @@ import plotly.express as px
 
 st.set_page_config(
     page_title="Dashboard Compras Directas & Cruce SAP",
-    page_icon="📊",
+    page_icon=":material/bar_chart:",
     layout="wide",
 )
 
@@ -19,8 +19,8 @@ PREFIJOS_ARIBA = ("3",)
 PREFIJOS_SAP_HANA = ("4", "45", "47")
 
 PLAT_TODAS = "Todas"
-ESTADO_CRUZADO = "✅ Cruzado con ME2M"
-ESTADO_SOLO_ME5A = "⚠️ Pedido no está en ME2M"
+ESTADO_CRUZADO = "Cruzado con ME2M"
+ESTADO_SOLO_ME5A = "Pedido no está en ME2M"
 PLAT_ARIBA = "Ariba"
 PLAT_HANA = "SAP HANA"
 PLAT_OTRO = "Sin clasificar"
@@ -131,6 +131,13 @@ st.markdown("""
     }
     .step-title { font-weight: 700; font-size: 1.05rem; margin-bottom: 4px; }
     .step-text { opacity: 0.8; font-size: 0.92rem; }
+    .sidebar-title {
+        display: flex; align-items: center;
+        font-size: 1.15rem; font-weight: 700;
+        margin: 0.6rem 0 0.5rem 0;
+    }
+    .file-status { display: flex; align-items: center; font-size: 0.88rem; margin: 2px 0; opacity: 0.85; }
+    .sub-header { display: flex; align-items: center; font-size: 1.1rem; font-weight: 700; margin: 1rem 0 0.5rem 0; }
     /* Tarjetas del diagnóstico Ariba: el texto se ajusta en varias líneas, nunca se corta */
     .diag-card {
         border: 1px solid rgba(148,163,184,0.30);
@@ -164,6 +171,33 @@ SVG_ICONS = {
     "alert": '<svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>',
     "split": '<svg class="svg-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E11D48" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3"/><path d="m15 9 6-6"/></svg>',
 }
+
+# Íconos de línea (estilo Lucide) para títulos, barra lateral y estados.
+# Usan "currentColor" para heredar el color del texto (funcionan en tema claro y oscuro).
+_SVG_PATHS = {
+    "folder":   '<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/>',
+    "filter":   '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
+    "download": '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+    "check":    '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+    "pending":  '<circle cx="12" cy="12" r="10"/>',
+    "target":   '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+    "list":     '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/>',
+    "tick":     '<polyline points="20 6 9 17 4 12"/>',
+}
+
+
+def icono(nombre, size=18, color="currentColor", stroke=2.2):
+    """Devuelve un ícono SVG de línea listo para insertar en HTML."""
+    return (f'<svg class="svg-icon" width="{size}" height="{size}" viewBox="0 0 24 24" fill="none" '
+            f'stroke="{color}" stroke-width="{stroke}" stroke-linecap="round" stroke-linejoin="round" '
+            f'style="margin-right:8px;">{_SVG_PATHS[nombre]}</svg>')
+
+
+def titulo_sidebar(nombre_icono, texto):
+    st.sidebar.markdown(
+        f'<div class="sidebar-title">{icono(nombre_icono, 20, "#E11D48")}{texto}</div>',
+        unsafe_allow_html=True,
+    )
 
 st.markdown(
     f'<div class="custom-title">{SVG_ICONS["report"]} Reporte de Compras Directas, PNNA & Cruce SAP</div>'
@@ -270,14 +304,14 @@ def buscar_en_df(df, texto):
 def tarjeta_plataforma(nombre, regla, monto, cant, pct, color, activa):
     borde = color if activa else "rgba(148,163,184,0.35)"
     fondo = f"{color}1F" if activa else "rgba(148,163,184,0.06)"
-    check = "✔ SELECCIONADO" if activa else "&nbsp;"
+    check = f'{icono("tick", 15, color, 3)}SELECCIONADO' if activa else "&nbsp;"
     return f"""
     <div class="plat-card" style="border-color:{borde}; background:{fondo};">
         <div class="plat-head"><span class="plat-dot" style="background:{color};"></span>{nombre}</div>
         <div class="plat-rule">{regla}</div>
         <div class="plat-amount">${monto:,.0f}</div>
         <div class="plat-meta">{cant:,} pedidos · {pct:.1f}% del monto</div>
-        <div class="plat-check" style="color:{color};">{check}</div>
+        <div class="plat-check" style="color:{color}; display:flex; align-items:center;">{check}</div>
     </div>
     """
 
@@ -462,7 +496,7 @@ if "centros_sel" not in st.session_state:
 # =====================================================================
 # BARRA LATERAL: CARGA DE ARCHIVOS
 # =====================================================================
-st.sidebar.markdown("## 📂 1. Cargar archivos SAP")
+titulo_sidebar("folder", "1. Cargar archivos SAP")
 file_me2m = st.sidebar.file_uploader(
     "ME2M – Pedidos de compra (.xlsx)",
     type=["xlsx"],
@@ -478,15 +512,19 @@ df_me5a = load_excel(file_me5a)
 df_me2m = load_excel(file_me2m)
 
 # Estado de carga visible
-estado_me2m = f"✅ ME2M cargado ({len(df_me2m):,} filas)" if df_me2m is not None else "⬜ ME2M pendiente"
-estado_me5a = f"✅ ME5A cargado ({len(df_me5a):,} filas)" if df_me5a is not None else "⬜ ME5A pendiente"
-st.sidebar.caption(f"{estado_me2m}  \n{estado_me5a}")
+def _estado_archivo(nombre, df):
+    if df is not None:
+        return f'<div class="file-status">{icono("check", 16, "#16A34A")}{nombre} cargado ({len(df):,} filas)</div>'
+    return f'<div class="file-status">{icono("pending", 16, "#94A3B8")}{nombre} pendiente</div>'
+
+
+st.sidebar.markdown(_estado_archivo("ME2M", df_me2m) + _estado_archivo("ME5A", df_me5a), unsafe_allow_html=True)
 
 # =====================================================================
 # PANTALLA DE BIENVENIDA (sin archivos)
 # =====================================================================
 if df_me2m is None and df_me5a is None:
-    st.info("👈 Para comenzar, sube tus archivos de Excel en el panel de la izquierda.")
+    st.info("Para comenzar, sube tus archivos de Excel en el panel de la izquierda.", icon=":material/arrow_back:")
     s1, s2, s3 = st.columns(3)
     pasos = [
         ("1", "Sube los archivos", "Carga el ME2M (pedidos) y, si quieres analizar PNNA y el cruce, también el ME5A."),
@@ -513,7 +551,7 @@ if df_me2m is not None:
     col_pos_me2m = next((c for c in df_me2m.columns if 'posición' in c.lower() or 'posicion' in c.lower()), 'Posición')
 
     # Configuración de la clasificación Ariba / SAP HANA (editable por el usuario)
-    with st.sidebar.expander("⚙️ Configuración Ariba / SAP HANA"):
+    with st.sidebar.expander("Configuración Ariba / SAP HANA", icon=":material/settings:"):
         opciones_id = list(df_me2m.columns)
         idx_default = opciones_id.index(col_doc_me2m) if col_doc_me2m in opciones_id else 0
         col_id_plataforma = st.selectbox(
@@ -602,7 +640,7 @@ if df_me2m is not None and df_me5a is not None and col_ped_me5a in df_me5a.colum
 # =====================================================================
 # BARRA LATERAL: FILTROS
 # =====================================================================
-st.sidebar.markdown("## 🔎 2. Filtros")
+titulo_sidebar("filter", "2. Filtros")
 centros_me2m = df_me2m[col_centro_me2m].dropna().astype(str).unique() if df_me2m is not None and col_centro_me2m in df_me2m.columns else []
 centros_me5a = df_me5a[col_centro_me5a].dropna().astype(str).unique() if df_me5a is not None and col_centro_me5a in df_me5a.columns else []
 todos_centros = sorted(list(set(centros_me2m).union(set(centros_me5a))))
@@ -625,7 +663,7 @@ st.sidebar.markdown(
     "<small>Se cambia con el selector grande del panel principal.</small>",
     unsafe_allow_html=True,
 )
-st.sidebar.button("↺ Limpiar filtros", on_click=limpiar_filtros, use_container_width=True)
+st.sidebar.button("Limpiar filtros", icon=":material/restart_alt:", on_click=limpiar_filtros, use_container_width=True)
 
 # Filtro por centro
 df_me2m_filt = df_me2m.copy() if df_me2m is not None else None
@@ -667,7 +705,7 @@ if df_me2m_filt is not None:
         fila = resumen_plat[resumen_plat['Plataforma'] == plat]
         return float(fila[campo].iloc[0]) if not fila.empty else 0.0
 
-    st.markdown('<div class="section-label">🎯 ¿Qué compras directas quieres analizar?</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-label" style="display:flex;align-items:center;">{icono("target", 20, "#E11D48")}¿Qué compras directas quieres analizar?</div>', unsafe_allow_html=True)
 
     opciones = [
         (PLAT_TODAS, "Todas las compras directas (AD)", total_monto, total_cant, 100.0 if total_monto else 0.0),
@@ -684,7 +722,8 @@ if df_me2m_filt is not None:
                 unsafe_allow_html=True,
             )
             st.button(
-                f"{'✔ ' if activa else ''}Ver {nombre}",
+                f"Ver {nombre}",
+                icon=":material/check:" if activa else None,
                 key=f"btn_plat_{nombre}",
                 type="primary" if activa else "secondary",
                 use_container_width=True,
@@ -694,7 +733,7 @@ if df_me2m_filt is not None:
 
     # Diagnóstico de dónde vienen (o por qué faltan) los pedidos Ariba
     sin_ariba = int(_dato(PLAT_ARIBA, 'Cant. Pedidos')) == 0
-    with st.expander("🔍 ¿De dónde salen los pedidos Ariba?", expanded=sin_ariba):
+    with st.expander("¿De dónde salen los pedidos Ariba?", expanded=sin_ariba, icon=":material/manage_search:"):
         # Resumen en una frase, en lenguaje simple
         n_me2m = diag_ariba['me2m_total']
         n_me5a = diag_ariba['me5a_agregados']
@@ -731,14 +770,14 @@ if df_me2m_filt is not None:
 
         if diag_ariba['me2m_total'] > diag_ariba['me2m_ad'] and not incluir_ariba_sin_ad:
             st.warning("Hay pedidos Ariba en ME2M sin 'AD' en Licitación. Activa la opción correspondiente en "
-                       "**⚙️ Configuración Ariba / SAP HANA** para incluirlos.")
+                       "**Configuración Ariba / SAP HANA** (barra lateral) para incluirlos.")
         if diag_ariba['me5a_extra'] > 0 and not incluir_ariba_me5a:
             st.warning(f"Hay {diag_ariba['me5a_extra']:,} registros Ariba en ME5A que no están en ME2M. "
-                       "Activa la opción correspondiente en **⚙️ Configuración Ariba / SAP HANA** para incluirlos.")
+                       "Activa la opción correspondiente en **Configuración Ariba / SAP HANA** (barra lateral) para incluirlos.")
         if sin_ariba:
             st.error(f"No se encontraron IDs que empiecen con 3 en la columna «{col_id_plataforma}» (ME2M) "
                      "ni en la columna de pedido de la ME5A. Abajo están las columnas donde sí aparecen "
-                     "valores que empiezan con 3: elige la correcta en **⚙️ Configuración Ariba / SAP HANA**.")
+                     "valores que empiezan con 3: elige la correcta en **Configuración Ariba / SAP HANA** (barra lateral).")
             cols_busqueda = [c for c in df_me2m.columns if c not in ('Monto_Limpio', 'Es_AD', 'Es_Compra_Directa', 'Plataforma', 'Fuente')]
             cand = columnas_con_ids_ariba(df_me2m[df_me2m['Fuente'] == 'ME2M'][cols_busqueda])
             if not cand.empty:
@@ -753,13 +792,13 @@ if df_me2m_filt is not None:
                 st.info("Ningún archivo contiene valores que empiecen con 3. Revisa que la exportación de ME2M "
                         "incluya los pedidos creados desde Ariba (variante / clase de documento).")
         else:
-            st.caption("ℹ️ Regla: un pedido es **Ariba** si su número empieza con **3**, y **SAP HANA** si empieza "
+            st.caption(":material/info: Regla: un pedido es **Ariba** si su número empieza con **3**, y **SAP HANA** si empieza "
                        "con **4** (45 o 47). Para los pedidos que vienen de la ME5A, el monto usado es el de la SOLPED.")
 
     cant_otro = int(_dato(PLAT_OTRO, 'Cant. Pedidos'))
     if cant_otro > 0:
         st.caption(
-            f"⚠️ {cant_otro:,} compras directas tienen un ID que no comienza con 3 ni con 4 "
+            f":material/warning: {cant_otro:,} compras directas tienen un ID que no comienza con 3 ni con 4 "
             f"(columna «{col_id_plataforma}»). Sólo aparecen al elegir «Todas»."
         )
 
@@ -842,11 +881,12 @@ if df_me5a_filt is not None and df_me2m_filt is not None:
 # =====================================================================
 # BARRA LATERAL: EXPORTAR
 # =====================================================================
-st.sidebar.markdown("## 📥 3. Exportar reporte")
+titulo_sidebar("download", "3. Exportar reporte")
 st.sidebar.caption(f"Incluye los filtros activos (plataforma: **{plataforma_sel}**).")
 excel_data = export_to_excel_styled(ranking_centro, grp_df, pnna_area, merged_df, df_me2m_filt, df_me5a_filt, resumen_plat)
 st.sidebar.download_button(
-    label="⬇️ Descargar Reporte Completo (Excel)",
+    label="Descargar Reporte Completo (Excel)",
+    icon=":material/download:",
     data=excel_data,
     file_name=f"Reporte_Compras_Directas_{plataforma_sel.replace(' ', '_')}.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -869,10 +909,10 @@ cant_cd = df_cd.shape[0] if df_cd is not None else 0
 monto_pnna = df_me5a_filt[df_me5a_filt['Es_PNNA']]['Monto_Limpio'].sum() if df_me5a_filt is not None else 0.0
 cant_pnna = df_me5a_filt[df_me5a_filt['Es_PNNA']].shape[0] if df_me5a_filt is not None else 0
 
-kpi1.metric("💰 Monto Directas", f"${monto_cd:,.0f}", help=f"Plataforma: {plataforma_sel}")
-kpi2.metric("🧾 Órdenes Directas", f"{cant_cd:,}", help=f"Plataforma: {plataforma_sel}")
-kpi3.metric("⏳ Monto PNNA", f"${monto_pnna:,.0f}")
-kpi4.metric("📋 SOLPEDs PNNA", f"{cant_pnna:,}")
+kpi1.metric(":material/payments: Monto Directas", f"${monto_cd:,.0f}", help=f"Plataforma: {plataforma_sel}")
+kpi2.metric(":material/receipt_long: Órdenes Directas", f"{cant_cd:,}", help=f"Plataforma: {plataforma_sel}")
+kpi3.metric(":material/hourglass_empty: Monto PNNA", f"${monto_pnna:,.0f}")
+kpi4.metric(":material/assignment: SOLPEDs PNNA", f"{cant_pnna:,}")
 
 st.markdown("")
 
@@ -880,11 +920,11 @@ st.markdown("")
 # PESTAÑAS
 # =====================================================================
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "🏆 Ranking por Centro",
-    "🔀 Ariba vs SAP HANA",
-    "🧩 Grupo de Compra",
-    "⚠️ PNNA por Área",
-    "🔗 Cruce SOLPED vs Pedido",
+    ":material/leaderboard: Ranking por Centro",
+    ":material/compare_arrows: Ariba vs SAP HANA",
+    ":material/donut_large: Grupo de Compra",
+    ":material/pending_actions: PNNA por Área",
+    ":material/link: Cruce SOLPED vs Pedido",
 ])
 
 # ---------------- Tab 1: Ranking Compras Directas x Centro ----------------
@@ -971,7 +1011,7 @@ with tab2:
             )
             st.plotly_chart(fig_comp, use_container_width=True)
 
-        st.markdown(f"#### 🧾 Detalle de compras directas · {plataforma_sel}")
+        st.markdown(f'<div class="sub-header">{icono("list", 20, "#E11D48")}Detalle de compras directas · {plataforma_sel}</div>', unsafe_allow_html=True)
         cols_det = [c for c in [col_id_plataforma, col_doc_me2m, col_pos_me2m, 'Plataforma', col_centro_me2m,
                                 col_grp_me2m, col_licita_me2m, 'Fuente', 'Monto_Limpio'] if c in df_cd.columns]
         cols_det = list(dict.fromkeys(cols_det))  # quita duplicados manteniendo orden
@@ -1017,7 +1057,7 @@ with tab3:
 # ---------------- Tab 4: PNNA ----------------
 with tab4:
     st.markdown(f'<div class="custom-header">{SVG_ICONS["alert"]} Ranking de PNNA (Posiciones No Asignadas) por Área / Autor</div>', unsafe_allow_html=True)
-    st.caption("ℹ️ El filtro Ariba / SAP HANA no aplica aquí: las PNNA todavía no tienen pedido asignado.")
+    st.caption(":material/info: El filtro Ariba / SAP HANA no aplica aquí: las PNNA todavía no tienen pedido asignado.")
     if pnna_area is not None and not pnna_area.empty:
         fig_pnna = px.bar(
             pnna_area.head(15),
@@ -1047,9 +1087,9 @@ with tab5:
         n_solo_me5a = int((merged_df['Estado cruce'] == ESTADO_SOLO_ME5A).sum())
 
         m1, m2, m3 = st.columns(3)
-        m1.metric("📋 SOLPEDs con pedido", f"{len(merged_df):,}")
-        m2.metric("✅ Cruzadas con ME2M", f"{n_cruzados:,}")
-        m3.metric("⚠️ Pedido no está en ME2M", f"{n_solo_me5a:,}")
+        m1.metric(":material/assignment: SOLPEDs con pedido", f"{len(merged_df):,}")
+        m2.metric(":material/check_circle: Cruzadas con ME2M", f"{n_cruzados:,}")
+        m3.metric(":material/error_outline: Pedido no está en ME2M", f"{n_solo_me5a:,}")
 
         if n_solo_me5a > 0:
             st.caption("«Pedido no está en ME2M»: la SOLPED tiene N° de pedido en la ME5A, pero ese pedido no viene "
